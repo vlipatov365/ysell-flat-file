@@ -1,0 +1,87 @@
+[
+    {
+        "id": 1001,
+        "name": "Umwälzpumpe für Geschirrspüler Bosch",
+        "sku": "VP-1001",
+        "condition": "new",
+        "category_id": "20715",
+        "suppliers": [
+            {
+                "name": "Hauptlieferant GmbH",
+                "price": 12.5
+            }
+        ],
+        "images": [
+            {
+                "url": "https:\/\/cdn.ysell.pro\/products\/1001\/main.jpg"
+            }
+        ],
+        "brand": "Viox",
+        "manufacturer": "Viox",
+        "color": "Schwarz",
+        "material": "Kunststoff",
+        "compatible_brands": "Bosch, Siemens, Neff",
+        "compatible_models": [
+            "SMV50E90EU",
+            "SMV51E10EU",
+            "SMV53L00EU"
+        ]
+    },
+    {
+        "id": 1002,
+        "name": "Ablaufpumpe Waschmaschine Samsung",
+        "sku": "DC31-00030A",
+        "condition": "new",
+        "category_id": "20715",
+        "suppliers": [
+            {
+                "name": "Ersatzteil Import",
+                "price": 18.9
+            }
+        ],
+        "images": [
+            {
+                "url": "https:\/\/cdn.ysell.pro\/products\/1002\/main.jpg"
+            }
+        ],
+        "brand": "Samsung",
+        "manufacturer": "Samsung",
+        "model_number": "DC31-00030A",
+        "color": "Grau",
+        "material": "ABS-Kunststoff",
+        "compatible_brands": "Samsung",
+        "compatible_models": [
+            "WF70F5E0W2W",
+            "WF80F5E4W4W",
+            "WF90F5E6QW4"
+        ]
+    },
+    {
+        "id": 1003,
+        "name": "Türdichtung Kühlschrank Whirlpool",
+        "sku": "VP-1003",
+        "condition": "used",
+        "category_id": "43576",
+        "suppliers": [
+            {
+                "name": "Lager Berlin",
+                "price": 9.99
+            }
+        ],
+        "images": [
+            {
+                "url": "https:\/\/cdn.ysell.pro\/products\/1003\/main.jpg"
+            }
+        ],
+        "brand": "Viox",
+        "manufacturer": "Viox",
+        "color": "Weiß",
+        "material": "EPDM-Gummi",
+        "compatible_brands": "Whirlpool, Bauknecht",
+        "compatible_models": [
+            "ARG590A",
+            "ARC4030",
+            "WBC3525A"
+        ]
+    }
+]
