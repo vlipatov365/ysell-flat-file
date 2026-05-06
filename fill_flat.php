@@ -7,7 +7,7 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 
 // ─── Config ────────────────────────────────────────────────────────────────
-$apiKey  = getenv('YSELL_API_KEY')  ?: '149185983e29fed80f5010edd60410b7';
+$apiKey  = getenv('YSELL_API_KEY');
 $baseUrl = getenv('YSELL_BASE_URL') ?: 'https://4457.test1.ysell.pro';
 
 // ─── HTTP: YSELL API ───────────────────────────────────────────────────────

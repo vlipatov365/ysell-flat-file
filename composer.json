@@ -2,6 +2,6 @@
     "name": "ysell/flat-file-filler",
     "description": "eBay flat file filler from YSELL API",
     "require": {
-        "phpoffice/phpspreadsheet": "^5.7"
+        "phpoffice/phpspreadsheet": "5.7.0"
     }
 }
