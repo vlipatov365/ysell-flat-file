@@ -25,9 +25,9 @@ function apiGet(string $url, string $apiKey): array
         CURLOPT_TIMEOUT        => 30,
         CURLOPT_FOLLOWLOCATION => true,
     ]);
-    $body    = curl_exec($ch);
-    $code    = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $error   = curl_error($ch);
+    $body  = curl_exec($ch);
+    $code  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $error = curl_error($ch);
     curl_close($ch);
 
     if ($error) {
@@ -36,15 +36,14 @@ function apiGet(string $url, string $apiKey): array
     if ($code >= 400) {
         throw new RuntimeException("API returned HTTP {$code}: {$body}");
     }
-
     $data = json_decode($body, true);
     if ($data === null) {
-        throw new RuntimeException("Invalid JSON response: {$body}");
+        throw new RuntimeException("Invalid JSON: {$body}");
     }
     return $data;
 }
 
-// ─── Pagination ────────────────────────────────────────────────────────────
+// ─── Fetch all products (paginated) ────────────────────────────────────────
 function fetchAllProducts(string $baseUrl, string $apiKey): array
 {
     $products = [];
@@ -54,13 +53,11 @@ function fetchAllProducts(string $baseUrl, string $apiKey): array
         echo "  Fetching page {$page}...\n";
         $response = apiGet("{$baseUrl}/api/v1/product?per_page=50&page={$page}", $apiKey);
 
-        // Support both {data:[...], meta:{...}} and direct array responses
-        $items    = $response['data']        ?? $response['products'] ?? $response;
-        $lastPage = $response['meta']['last_page']
-            ?? $response['last_page']
-            ?? ($response['meta']['total_pages'] ?? 1);
+        // API returns a plain array (not wrapped in data/meta)
+        $items    = isset($response['data']) ? $response['data'] : $response;
+        $lastPage = $response['meta']['last_page'] ?? $response['last_page'] ?? 1;
 
-        if (!is_array($items)) {
+        if (!is_array($items) || empty($items)) {
             break;
         }
 
@@ -71,83 +68,65 @@ function fetchAllProducts(string $baseUrl, string $apiKey): array
     return $products;
 }
 
-// ─── Nested value helper ────────────────────────────────────────────────────
-/**
- * Resolve a dot-notation path with multiple fallback keys.
- * e.g. get($p, 'brand.name', 'brand', 'manufacturer') → first non-empty value
- */
-function get(array $data, string ...$paths): mixed
+// ─── Fetch manufacturers: returns [id => name] ──────────────────────────────
+function fetchManufacturers(string $baseUrl, string $apiKey): array
 {
-    foreach ($paths as $path) {
-        $keys  = explode('.', $path);
-        $value = $data;
-        foreach ($keys as $key) {
-            if (is_array($value) && array_key_exists($key, $value)) {
-                $value = $value[$key];
-            } else {
-                $value = null;
-                break;
+    try {
+        $response = apiGet("{$baseUrl}/api/v1/manufacturer", $apiKey);
+        $items    = isset($response['data']) ? $response['data'] : $response;
+        $map      = [];
+        foreach ($items as $m) {
+            if (isset($m['id'])) {
+                $map[(int)$m['id']] = (string)($m['name'] ?? $m['title'] ?? '');
             }
         }
-        if ($value !== null && $value !== '') {
-            return $value;
-        }
+        return $map;
+    } catch (RuntimeException $e) {
+        echo "  Warning: could not fetch manufacturers: " . $e->getMessage() . "\n";
+        return [];
     }
-    return '';
 }
 
-// ─── Image URL ─────────────────────────────────────────────────────────────
-function resolveImage(array $product): string
+// ─── Extract OEM part numbers from title ───────────────────────────────────
+// Titles follow patterns like:
+//   "... wie Bosch 00600436 für ..."
+//   "... wie IGNIS 488000525918 EGO 20.40943.000 Bauknecht 488000525918 ..."
+//   "... Liebherr 7433698 9193354"
+function parseTitleForCompatibility(string $title): array
 {
-    // Try various common image field structures
-    foreach (['images', 'photos', 'pictures', 'gallery'] as $key) {
-        if (!empty($product[$key]) && is_array($product[$key])) {
-            $first = $product[$key][0];
-            return is_array($first)
-                ? ($first['url'] ?? $first['path'] ?? $first['link'] ?? $first['src'] ?? '')
-                : (string)$first;
-        }
-    }
-    foreach (['image', 'photo', 'picture', 'image_url', 'photo_url', 'picture_url'] as $key) {
-        if (!empty($product[$key])) {
-            return (string)$product[$key];
-        }
-    }
-    return '';
-}
+    $brands = [];
+    $models = [];
 
-// ─── Price from suppliers ──────────────────────────────────────────────────
-function resolvePrice(array $product): string
-{
-    // Try suppliers array first
-    foreach (['suppliers', 'supplier', 'provider'] as $key) {
-        if (!empty($product[$key]) && is_array($product[$key])) {
-            $first = $product[$key][0];
-            $price = is_array($first)
-                ? ($first['price'] ?? $first['cost'] ?? $first['purchase_price'] ?? null)
-                : null;
-            if ($price !== null) {
-                return number_format((float)$price, 2, '.', '');
-            }
-        }
+    // Match everything after "wie " up to a preposition or end of string
+    if (preg_match('/\bwie\s+(.+?)(?:\s+(?:für|in|an|von|mit|zu)\b|$)/u', $title, $wie)) {
+        $segment = $wie[1];
+
+        // Part numbers: must contain at least one digit (filters out pure brand words like IGNIS)
+        preg_match_all('/\b[A-Z0-9]*\d[A-Z0-9.\-\/]*\b/u', $segment, $numMatches);
+        $models = array_slice(array_unique($numMatches[0]), 0, 3);
+
+        // Brands: letter-only tokens (no digits), any capitalization (Bosch, IGNIS, EGO)
+        preg_match_all('/\b([A-ZÄÖÜ][A-Za-zäöüÄÖÜß]*)\b/u', $segment, $brandMatches);
+        $brands = array_unique(array_filter($brandMatches[1], fn($w) => !preg_match('/\d/', $w)));
     }
-    // Fallback to direct price fields
-    foreach (['price', 'sell_price', 'retail_price', 'cost', 'purchase_price'] as $key) {
-        if (isset($product[$key]) && $product[$key] !== '') {
-            return number_format((float)$product[$key], 2, '.', '');
-        }
+
+    // Fallback: extract part numbers directly from title (e.g. "Bosch 17002715 / 17001433 ...")
+    if (empty($models)) {
+        preg_match_all('/\b[A-Z0-9]*\d[A-Z0-9.\-\/]{4,}\b/', $title, $numMatches);
+        $models = array_slice($numMatches[0], 0, 3);
     }
-    return '';
+
+    return [
+        'brands' => array_values($brands),
+        'models' => $models,
+    ];
 }
 
 // ─── Condition ─────────────────────────────────────────────────────────────
 function resolveCondition(array $product): array
 {
-    $raw = strtolower((string)get($product, 'condition', 'state', 'product_condition', 'status_condition'));
-    $isNew = in_array($raw, ['new', 'neu', 'новый', '1', 'new_other'], true)
-        || $raw === ''   // default to new if not specified
-        || str_contains($raw, 'new')
-        || str_contains($raw, 'neu');
+    $raw   = strtolower((string)($product['condition'] ?? ''));
+    $isNew = ($raw === '' || str_contains($raw, 'new') || str_contains($raw, 'neu'));
 
     return [
         'id'          => $isNew ? '1000' : '3000',
@@ -155,172 +134,127 @@ function resolveCondition(array $product): array
     ];
 }
 
-// ─── Compatible models ("Passend für") ────────────────────────────────────
-function resolveCompatibleModels(array $product): string
+// ─── Price ─────────────────────────────────────────────────────────────────
+function resolvePrice(array $product): string
 {
-    // Try various field names for compatibility data
-    foreach (['compatible_models', 'compatibility', 'passend_fur', 'suitable_for', 'fits', 'fit_for'] as $key) {
-        if (!empty($product[$key])) {
-            $val = $product[$key];
-            if (is_array($val)) {
-                // Take up to 3 model numbers
-                $models = array_slice(array_filter(array_map(function($m) {
-                    return is_array($m) ? ($m['model'] ?? $m['number'] ?? $m['name'] ?? '') : (string)$m;
-                }, $val)), 0, 3);
-                return implode(', ', $models);
-            }
-            if (is_string($val)) {
-                // If comma-separated string, take first 3
-                $parts = array_slice(array_map('trim', explode(',', $val)), 0, 3);
-                return implode(', ', $parts);
-            }
-        }
+    // Real API field is purchase_price (string|null)
+    $price = $product['purchase_price'] ?? $product['netto'] ?? null;
+    if ($price === null || $price === '' || (float)$price === 0.0) {
+        return '';
     }
-    // Also check nested attributes
-    foreach (['attributes', 'characteristics', 'specs', 'properties', 'custom_fields'] as $attrKey) {
-        if (!empty($product[$attrKey]) && is_array($product[$attrKey])) {
-            foreach (['compatible_models', 'passend_fur', 'fits', 'compatibility', 'models'] as $key) {
-                if (!empty($product[$attrKey][$key])) {
-                    $val = $product[$attrKey][$key];
-                    if (is_array($val)) {
-                        return implode(', ', array_slice($val, 0, 3));
-                    }
-                    $parts = array_slice(array_map('trim', explode(',', (string)$val)), 0, 3);
-                    return implode(', ', $parts);
-                }
-            }
-        }
-    }
-    return '';
+    return number_format((float)$price, 2, '.', '');
 }
 
-// ─── Attribute resolver ────────────────────────────────────────────────────
-function resolveAttr(array $product, string ...$keys): string
+// ─── Image ─────────────────────────────────────────────────────────────────
+function resolveImage(array $product): string
 {
-    // Direct field check
-    foreach ($keys as $key) {
-        $val = get($product, $key);
-        if ($val !== '') return (string)$val;
-    }
-    // Check nested attribute blocks
-    foreach (['attributes', 'characteristics', 'specs', 'properties', 'custom_fields', 'extra'] as $attrBlock) {
-        if (!empty($product[$attrBlock]) && is_array($product[$attrBlock])) {
-            foreach ($keys as $key) {
-                // Handle both associative {key: value} and indexed [{name: key, value: val}] formats
-                if (isset($product[$attrBlock][$key]) && $product[$attrBlock][$key] !== '') {
-                    return (string)$product[$attrBlock][$key];
-                }
-                // Indexed format
-                foreach ($product[$attrBlock] as $attr) {
-                    if (is_array($attr)) {
-                        $attrName = strtolower((string)($attr['name'] ?? $attr['key'] ?? $attr['code'] ?? ''));
-                        if (in_array($attrName, array_map('strtolower', [$key]), true)) {
-                            return (string)($attr['value'] ?? $attr['val'] ?? '');
-                        }
-                    }
-                }
-            }
-        }
-    }
-    return '';
+    // Real API: "image" is a plain string (or null)
+    return (string)($product['image'] ?? '');
 }
 
-// ─── Brand / Manufacturer ──────────────────────────────────────────────────
-function resolveBrand(array $product): string
+// ─── SKU / Herstellernummer ─────────────────────────────────────────────────
+function resolveSkuAndHerstellernummer(array $product, string $manufacturerName): array
 {
-    return resolveAttr($product, 'brand', 'manufacturer', 'brand_name', 'make', 'hersteller', 'marke');
-}
+    $id      = (string)($product['id'] ?? '');
+    $extId   = (string)($product['ext_id'] ?? '');
+    $isViox  = stripos($manufacturerName, 'viox') !== false
+            || stripos($manufacturerName, 'виокс') !== false;
 
-// ─── SKU logic ─────────────────────────────────────────────────────────────
-function resolveSkuAndHerstellernummer(array $product): array
-{
-    $id    = (string)($product['id'] ?? '');
-    $sku   = (string)get($product, 'sku', 'article_number', 'article', 'code', 'product_code');
-    $brand = strtolower(resolveBrand($product));
-
-    $isViox = str_contains($brand, 'viox') || str_contains($brand, 'виокс');
+    // Extract first OEM article number from title (after "wie BRAND NUMBER")
+    $compat  = parseTitleForCompatibility((string)($product['title'] ?? ''));
+    $oemNum  = $compat['models'][0] ?? '';
 
     if ($isViox) {
         return [
-            'custom_label'    => "{$id}-MP",
-            'herstellernummer' => $sku,
+            'custom_label'     => "{$id}-MP",
+            'herstellernummer' => $oemNum,   // SKU = OEM article extracted from title
         ];
     }
 
     return [
-        'custom_label'    => $sku !== '' ? "sku={$sku}" : "sku={$id}",
-        'herstellernummer' => resolveAttr($product, 'model_number', 'model', 'oem_number', 'part_number', 'article_number') ?: $sku,
+        'custom_label'     => $extId !== '' ? $extId : $id,
+        'herstellernummer' => $oemNum,
     ];
 }
 
 // ─── Main mapping ──────────────────────────────────────────────────────────
-function mapProductToRow(array $product): array
+function mapProductToRow(array $product, array $manufacturers): array
 {
-    $condition = resolveCondition($product);
-    $sku       = resolveSkuAndHerstellernummer($product);
-    $brand     = resolveBrand($product);
-    $title     = substr((string)get($product, 'name', 'title', 'product_name', 'label'), 0, 80);
+    $manufacturerId   = (int)($product['manufacturer_id'] ?? 0);
+    $manufacturerName = $manufacturers[$manufacturerId] ?? '';
 
-    // C:Produktart — first word of product name
+    $condition = resolveCondition($product);
+    $sku       = resolveSkuAndHerstellernummer($product, $manufacturerName);
+    $compat    = parseTitleForCompatibility((string)($product['title'] ?? ''));
+
+    // Title: real field is "title", truncate to 80 chars
+    $title     = mb_substr((string)($product['title'] ?? ''), 0, 80);
+
+    // C:Produktart / C:Produkt — first word of title
     $firstWord = explode(' ', trim($title))[0] ?? '';
-    $category  = (string)get($product, 'category.id', 'category_id', 'ebay_category', 'category');
+
+    // Compatible brands: parsed from title (e.g. "wie Bosch ..." → "Bosch")
+    $compatBrands = implode(', ', $compat['brands']);
+
+    // Compatible models: up to 3 part numbers from title
+    $compatModels = implode(', ', $compat['models']);
 
     return [
-        '*Action'                  => 'Add (SiteID=Germany|Country=DE|Currency=EUR|Version=941)',
-        'Custom label (SKU)'       => $sku['custom_label'],
-        '*Category'                => $category,
-        '*Title'                   => $title,
-        '*ConditionID'             => $condition['id'],
-        'ConditionDescription'     => $condition['description'],
-        '*StartPrice'              => resolvePrice($product),
-        '*Quantity'                => '1',
-        '*Format'                  => 'FixedPrice',
-        '*Duration'                => 'GTC',
-        '*Location'                => 'Bremen',
-        'ShippingProfileName'      => 'DHL-Standardvorlage - (ID: 76770166018)',
-        'ReturnProfileName'        => 'Standard-Widerruf 30 Tage für eBay Plus - (ID: 247364069018)',
-        'PaymentProfileName'       => 'UK Gutschein',
-        'PicURL'                   => resolveImage($product),
-        'C:Marke'                  => $brand,
-        'C:Hersteller'             => resolveAttr($product, 'manufacturer', 'brand', 'hersteller'),
-        'C:Produktart'             => $firstWord,
-        'C:Produkt'                => $firstWord,
-        'C:Farbe'                  => resolveAttr($product, 'color', 'colour', 'farbe'),
-        'C:Material'               => resolveAttr($product, 'material', 'material_type'),
-        'C:Markenkompatibilität'   => resolveAttr($product, 'compatible_brands', 'brand_compatibility', 'fits_brands', 'markenkompatibilitaet'),
-        'C:Modellkompatibilität'   => resolveCompatibleModels($product),
-        'C:Herstellernummer'       => $sku['herstellernummer'],
-        'C:Installationsart'       => 'Vollintegriert',
+        '*Action'                => 'Add (SiteID=Germany|Country=DE|Currency=EUR|Version=941)',
+        'Custom label (SKU)'     => $sku['custom_label'],
+        '*Category'              => '',                        // not in API — fill manually or leave blank
+        '*Title'                 => $title,
+        '*ConditionID'           => $condition['id'],
+        'ConditionDescription'   => $condition['description'],
+        '*StartPrice'            => resolvePrice($product),
+        '*Quantity'              => '1',
+        '*Format'                => 'FixedPrice',
+        '*Duration'              => 'GTC',
+        '*Location'              => 'Bremen',
+        'ShippingProfileName'    => 'DHL-Standardvorlage - (ID: 76770166018)',
+        'ReturnProfileName'      => 'Standard-Widerruf 30 Tage für eBay Plus - (ID: 247364069018)',
+        'PaymentProfileName'     => 'UK Gutschein',
+        'PicURL'                 => resolveImage($product),
+        'C:Marke'                => $manufacturerName,
+        'C:Hersteller'           => $manufacturerName,
+        'C:Produktart'           => $firstWord,
+        'C:Produkt'              => $firstWord,
+        'C:Farbe'                => '',                        // not in list API — leave blank
+        'C:Material'             => '',                        // not in list API — leave blank
+        'C:Markenkompatibilität' => $compatBrands,
+        'C:Modellkompatibilität' => $compatModels,
+        'C:Herstellernummer'     => $sku['herstellernummer'],
+        'C:Installationsart'     => 'Vollintegriert',
     ];
 }
 
-// ─── Column letter map (must match flat_template.xlsx) ─────────────────────
+// ─── Column map ────────────────────────────────────────────────────────────
 const COL_MAP = [
-    '*Action'                  => 'A',
-    'Custom label (SKU)'       => 'B',
-    '*Category'                => 'C',
-    '*Title'                   => 'D',
-    '*ConditionID'             => 'E',
-    'ConditionDescription'     => 'F',
-    '*StartPrice'              => 'G',
-    '*Quantity'                => 'H',
-    '*Format'                  => 'I',
-    '*Duration'                => 'J',
-    '*Location'                => 'K',
-    'ShippingProfileName'      => 'L',
-    'ReturnProfileName'        => 'M',
-    'PaymentProfileName'       => 'N',
-    'PicURL'                   => 'O',
-    'C:Marke'                  => 'P',
-    'C:Hersteller'             => 'Q',
-    'C:Produktart'             => 'R',
-    'C:Produkt'                => 'S',
-    'C:Farbe'                  => 'T',
-    'C:Material'               => 'U',
-    'C:Markenkompatibilität'   => 'V',
-    'C:Modellkompatibilität'   => 'W',
-    'C:Herstellernummer'       => 'X',
-    'C:Installationsart'       => 'Y',
+    '*Action'                => 'A',
+    'Custom label (SKU)'     => 'B',
+    '*Category'              => 'C',
+    '*Title'                 => 'D',
+    '*ConditionID'           => 'E',
+    'ConditionDescription'   => 'F',
+    '*StartPrice'            => 'G',
+    '*Quantity'              => 'H',
+    '*Format'                => 'I',
+    '*Duration'              => 'J',
+    '*Location'              => 'K',
+    'ShippingProfileName'    => 'L',
+    'ReturnProfileName'      => 'M',
+    'PaymentProfileName'     => 'N',
+    'PicURL'                 => 'O',
+    'C:Marke'                => 'P',
+    'C:Hersteller'           => 'Q',
+    'C:Produktart'           => 'R',
+    'C:Produkt'              => 'S',
+    'C:Farbe'                => 'T',
+    'C:Material'             => 'U',
+    'C:Markenkompatibilität' => 'V',
+    'C:Modellkompatibilität' => 'W',
+    'C:Herstellernummer'     => 'X',
+    'C:Installationsart'     => 'Y',
 ];
 
 // ─── Entry point ───────────────────────────────────────────────────────────
@@ -332,10 +266,15 @@ if ($useSample) {
         fwrite(STDERR, "ERROR: sample_products.json not found.\n");
         exit(1);
     }
-    $products = json_decode(file_get_contents($sampleFile), true);
-    echo "Using sample data from sample_products.json (" . count($products) . " products)\n";
+    $products      = json_decode(file_get_contents($sampleFile), true);
+    $manufacturers = json_decode(file_get_contents(__DIR__ . '/sample_manufacturers.json'), true) ?? [];
+    echo "Using sample data (" . count($products) . " products)\n";
 } else {
-    echo "Fetching all products from YSELL API...\n";
+    echo "Fetching manufacturers...\n";
+    $manufacturers = fetchManufacturers($baseUrl, $apiKey);
+    echo "  Found " . count($manufacturers) . " manufacturers.\n";
+
+    echo "Fetching all products...\n";
     try {
         $products = fetchAllProducts($baseUrl, $apiKey);
     } catch (RuntimeException $e) {
@@ -344,20 +283,17 @@ if ($useSample) {
     }
 }
 
-echo "Total products fetched: " . count($products) . "\n";
+echo "Total products: " . count($products) . "\n";
 
-// Save raw JSON
 file_put_contents(__DIR__ . '/products_raw.json', json_encode($products, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-echo "Raw response saved to products_raw.json\n";
+echo "Saved products_raw.json\n";
 
-// Load template
 $spreadsheet = IOFactory::load(__DIR__ . '/flat_template.xlsx');
 $sheet       = $spreadsheet->getActiveSheet();
 
-// Fill from row 2
 $row = 2;
 foreach ($products as $product) {
-    $mapped = mapProductToRow($product);
+    $mapped = mapProductToRow($product, $manufacturers);
     foreach ($mapped as $header => $value) {
         $col = COL_MAP[$header] ?? null;
         if ($col !== null) {
@@ -367,7 +303,6 @@ foreach ($products as $product) {
     $row++;
 }
 
-// Save filled file
 $writer = new Xlsx($spreadsheet);
 $writer->save(__DIR__ . '/flat_filled.xlsx');
 

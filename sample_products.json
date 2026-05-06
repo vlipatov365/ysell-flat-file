@@ -1,60 +1,62 @@
 [
     {
-        "id": 1001,
-        "name": "Umwälzpumpe für Geschirrspüler Bosch",
-        "sku": "VP-1001",
-        "condition": "new",
-        "category_id": "20715",
-        "suppliers": [
-            {"name": "Hauptlieferant GmbH", "price": 12.50}
-        ],
-        "images": [
-            {"url": "https://cdn.ysell.pro/products/1001/main.jpg"}
-        ],
-        "brand": "Viox",
-        "manufacturer": "Viox",
-        "color": "Schwarz",
-        "material": "Kunststoff",
-        "compatible_brands": "Bosch, Siemens, Neff",
-        "compatible_models": ["SMV50E90EU", "SMV51E10EU", "SMV53L00EU"]
+        "id": 2,
+        "ext_id": "p-4457-2",
+        "title": "Aufbewahrungstasche für Zubehör Scheiben Bosch 00653180 von Küchmaschine",
+        "condition": "New",
+        "manufacturer_id": 1,
+        "purchase_price": null,
+        "netto": 0,
+        "owner_id": null,
+        "image": "https://4457.test1.ysell.pro/product_images/2/Удалить.jpg",
+        "setProducts": []
     },
     {
-        "id": 1002,
-        "name": "Ablaufpumpe Waschmaschine Samsung",
-        "sku": "DC31-00030A",
-        "condition": "new",
-        "category_id": "20715",
-        "suppliers": [
-            {"name": "Ersatzteil Import", "price": 18.90}
-        ],
-        "images": [
-            {"url": "https://cdn.ysell.pro/products/1002/main.jpg"}
-        ],
-        "brand": "Samsung",
-        "manufacturer": "Samsung",
-        "model_number": "DC31-00030A",
-        "color": "Grau",
-        "material": "ABS-Kunststoff",
-        "compatible_brands": "Samsung",
-        "compatible_models": ["WF70F5E0W2W", "WF80F5E4W4W", "WF90F5E6QW4"]
+        "id": 7,
+        "ext_id": "p-4457-7",
+        "title": "Seitenteil Halter Halterung rechts für Türfach Kühlschrank wie Liebherr 7433698 9193354",
+        "condition": "New",
+        "manufacturer_id": 2,
+        "purchase_price": "3.74",
+        "netto": 0,
+        "owner_id": null,
+        "image": "https://4457.test1.ysell.pro/product_images/7/16342021668.jpeg",
+        "setProducts": []
     },
     {
-        "id": 1003,
-        "name": "Türdichtung Kühlschrank Whirlpool",
-        "sku": "VP-1003",
-        "condition": "used",
-        "category_id": "43576",
-        "suppliers": [
-            {"name": "Lager Berlin", "price": 9.99}
-        ],
-        "images": [
-            {"url": "https://cdn.ysell.pro/products/1003/main.jpg"}
-        ],
-        "brand": "Viox",
-        "manufacturer": "Viox",
-        "color": "Weiß",
-        "material": "EPDM-Gummi",
-        "compatible_brands": "Whirlpool, Bauknecht",
-        "compatible_models": ["ARG590A", "ARC4030", "WBC3525A"]
+        "id": 8,
+        "ext_id": "p-4457-8",
+        "title": "Spannrolle wie Bosch 00600436 für Zweibandmotor Trockner",
+        "condition": "New",
+        "manufacturer_id": 2,
+        "purchase_price": "3.96",
+        "netto": 0,
+        "owner_id": null,
+        "image": "https://4457.test1.ysell.pro/product_images/8/p-1-69678_1-1_info.jpg",
+        "setProducts": []
+    },
+    {
+        "id": 5,
+        "ext_id": "p-4457-5",
+        "title": "Heizung Oberhitze SoftGrill wie IGNIS 488000525918 EGO 20.40943.000 Bauknecht 488000525918 481225998522 481225998472 für Herd Backofen",
+        "condition": "New",
+        "manufacturer_id": 2,
+        "purchase_price": null,
+        "netto": 0,
+        "owner_id": null,
+        "image": "https://4457.test1.ysell.pro/product_images/5/p-1-66796_1-2_info_DE.jpg",
+        "setProducts": []
+    },
+    {
+        "id": 12,
+        "ext_id": "p-4457-12",
+        "title": "Bosch Siemens 17002715 / 17001433 Backblech Fettpfanne Grillpfanne 455x375x39(33)mm für Herd",
+        "condition": "New",
+        "manufacturer_id": 1,
+        "purchase_price": "18.19",
+        "netto": 0,
+        "owner_id": null,
+        "image": "https://4457.test1.ysell.pro/product_images/12/13682.jpg",
+        "setProducts": []
     }
 ]
