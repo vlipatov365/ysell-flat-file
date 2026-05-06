@@ -4,86 +4,90 @@ require_once __DIR__ . '/vendor/autoload.php';
 use PhpOffice\PhpSpreadsheet\IOFactory;
 
 $file = __DIR__ . '/flat_filled.xlsx';
-if (!file_exists($file)) {
-    echo "flat_filled.xlsx not found.\n";
-    exit(1);
-}
+if (!file_exists($file)) { echo "flat_filled.xlsx not found.\n"; exit(1); }
 
-$spreadsheet = IOFactory::load($file);
-$sheet       = $spreadsheet->getActiveSheet();
-$highRow     = $sheet->getHighestRow();
-$highCol     = $sheet->getHighestColumn();
+$sheet   = IOFactory::load($file)->getActiveSheet();
+$highRow = $sheet->getHighestDataRow();
+
+// Read only columns we care about
+$colMap = [
+    'A' => '*Action', 'B' => 'Custom label (SKU)', 'C' => '*Category',
+    'D' => 'Description', 'E' => '*Title', 'F' => '*ConditionID',
+    'G' => 'ConditionDescription', 'H' => '*StartPrice', 'I' => '*Quantity',
+    'J' => '*Format', 'K' => '*Duration', 'L' => '*Location',
+    'M' => 'ShippingProfileName', 'N' => 'ReturnProfileName', 'O' => 'PaymentProfileName',
+    'P' => 'PicURL', 'Q' => 'C:Marke', 'R' => 'C:Hersteller',
+    'S' => 'C:Produktart', 'T' => 'C:Produkt', 'U' => 'C:Farbe',
+    'V' => 'C:Material', 'W' => 'C:Markenkompatibilität', 'X' => 'C:Modellkompatibilität',
+    'Y' => 'C:Herstellernummer', 'Z' => 'C:Installationsart',
+];
 
 echo "=== flat_filled.xlsx verification ===\n\n";
 
-// Step 5.1: Row count
+// 1. Row count
 $dataRows = $highRow - 1;
-echo "1. Data rows (excluding header): {$dataRows}\n";
+echo "1. Data rows: {$dataRows}\n";
 
-// Get header row
-$headers = [];
-for ($col = 'A'; $col <= $highCol; $col++) {
-    $val = $sheet->getCell($col . '1')->getValue();
-    if ($val !== '' && $val !== null) {
-        $headers[$col] = $val;
-    }
-}
-
-echo "\nColumns found:\n";
-foreach ($headers as $col => $name) {
-    echo "  {$col}: {$name}\n";
-}
-
-// Step 5.2: Check required columns for empty cells
-$required = ['A', 'D', 'E', 'G', 'H', 'I', 'J', 'K'];
-echo "\n2. Required column check (cols with *):\n";
+// 2. Required columns check
+$required = ['A' => '*Action', 'E' => '*Title', 'F' => '*ConditionID',
+             'H' => '*StartPrice', 'I' => '*Quantity', 'J' => '*Format',
+             'K' => '*Duration', 'L' => '*Location'];
+echo "\n2. Required columns:\n";
 $issues = [];
-foreach ($required as $col) {
+foreach ($required as $col => $name) {
     $empty = [];
     for ($row = 2; $row <= $highRow; $row++) {
-        $val = $sheet->getCell($col . $row)->getValue();
-        if ($val === '' || $val === null) {
-            $empty[] = $row;
-        }
+        if ((string)$sheet->getCell($col . $row)->getValue() === '') $empty[] = $row;
     }
-    $colName = $headers[$col] ?? $col;
     if (empty($empty)) {
-        echo "  {$col} ({$colName}): OK — all filled\n";
+        echo "  {$col} ({$name}): OK\n";
     } else {
-        echo "  {$col} ({$colName}): EMPTY in rows " . implode(', ', $empty) . "\n";
+        echo "  {$col} ({$name}): EMPTY rows " . implode(', ', array_slice($empty, 0, 5))
+             . (count($empty) > 5 ? '…' : '') . " [" . count($empty) . " total]\n";
         $issues[] = $col;
     }
 }
-echo empty($issues) ? "  → All required columns filled.\n" : "  → Some required columns have empty cells.\n";
 
-// Step 5.3: Sample 3 rows vs products_raw.json
-echo "\n3. Sample comparison (first 3 rows vs products_raw.json):\n";
+// 3. Category coverage
+echo "\n3. Category (*Category) coverage:\n";
+$noCat = 0;
+for ($row = 2; $row <= $highRow; $row++) {
+    if ((string)$sheet->getCell('C' . $row)->getValue() === '') $noCat++;
+}
+$filled = $dataRows - $noCat;
+echo "  Filled: {$filled}/{$dataRows}" . ($noCat > 0 ? " ({$noCat} without category)" : " ✓") . "\n";
+
+// 4. Description presence
+echo "\n4. Description column (D):\n";
+$noDesc = 0;
+for ($row = 2; $row <= $highRow; $row++) {
+    if (strlen((string)$sheet->getCell('D' . $row)->getValue()) < 100) $noDesc++;
+}
+echo "  " . ($noDesc === 0 ? "All rows have HTML description ✓" : "{$noDesc} rows missing/short description") . "\n";
+
+// 5. Sample rows
+echo "\n5. Sample rows (vs products_raw.json):\n";
 $raw = json_decode(file_get_contents(__DIR__ . '/products_raw.json'), true) ?? [];
 for ($row = 2; $row <= min(4, $highRow); $row++) {
     $idx = $row - 2;
-    $title  = $sheet->getCell('D' . $row)->getValue();
-    $price  = $sheet->getCell('G' . $row)->getValue();
-    $sku    = $sheet->getCell('B' . $row)->getValue();
-    $brand  = $sheet->getCell('P' . $row)->getValue();
-    $cond   = $sheet->getCell('E' . $row)->getValue();
-    echo "  Row {$row} (product #{$idx}): title='{$title}' | price={$price} | sku='{$sku}' | brand='{$brand}' | conditionID={$cond}\n";
+    echo "  Row {$row} (product #{$idx}):\n";
+    echo "    title    = " . mb_substr((string)$sheet->getCell('E' . $row)->getValue(), 0, 70) . "\n";
+    echo "    category = " . $sheet->getCell('C' . $row)->getValue() . "\n";
+    echo "    price    = " . $sheet->getCell('H' . $row)->getValue() . "\n";
+    echo "    sku      = " . $sheet->getCell('B' . $row)->getValue() . "\n";
+    echo "    brand    = " . $sheet->getCell('Q' . $row)->getValue() . "\n";
+    echo "    condID   = " . $sheet->getCell('F' . $row)->getValue() . "\n";
+    echo "    compat   = " . $sheet->getCell('W' . $row)->getValue() . "\n";
+    echo "    models   = " . $sheet->getCell('X' . $row)->getValue() . "\n";
 }
 
-// Step 5.4: Title length check
-echo "\n4. Title length check (max 80 chars):\n";
+// 6. Title length
+echo "\n6. Title length (≤80 chars):\n";
 $tooLong = [];
 for ($row = 2; $row <= $highRow; $row++) {
-    $title = (string)$sheet->getCell('D' . $row)->getValue();
-    if (mb_strlen($title) > 80) {
-        $tooLong[] = "Row {$row}: " . mb_strlen($title) . " chars — '{$title}'";
-    }
+    $t = (string)$sheet->getCell('E' . $row)->getValue();
+    if (mb_strlen($t) > 80) $tooLong[] = "Row {$row}: " . mb_strlen($t) . " chars";
 }
-if (empty($tooLong)) {
-    echo "  All titles ≤ 80 chars. OK\n";
-} else {
-    foreach ($tooLong as $item) {
-        echo "  OVER LIMIT: {$item}\n";
-    }
-}
+echo "  " . (empty($tooLong) ? "All ≤ 80 ✓" : implode("\n  ", $tooLong)) . "\n";
 
-echo "\nVerification complete.\n";
+echo "\nDone.\n";
