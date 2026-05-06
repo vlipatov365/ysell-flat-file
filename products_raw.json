@@ -25,8 +25,7 @@
         "productSuppliers": [
             {
                 "id": 101,
-                "supplier_id": 3,
-                "supplier_num": 3
+                "supplierNum": 3
             }
         ]
     },
@@ -44,8 +43,7 @@
         "productSuppliers": [
             {
                 "id": 102,
-                "supplier_id": 5,
-                "supplier_num": 5
+                "supplierNum": 5
             }
         ]
     },

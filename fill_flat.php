@@ -278,8 +278,8 @@ function resolvePrice(array $product, string $baseUrl, string $apiKey): string
     // Level 2: productSuppliers relation → GET /api/v1/supplier/{num}/product
     $suppliers = $product['productSuppliers'] ?? [];
     foreach ($suppliers as $ps) {
-        // supplierNum may be keyed as supplier_id, supplier_num, id, num, etc.
-        $num = $ps['supplier_id'] ?? $ps['supplier_num'] ?? $ps['id'] ?? $ps['num'] ?? null;
+        // supplierNum is the correct field per API spec; fallbacks for safety
+        $num = $ps['supplierNum'] ?? $ps['supplier_id'] ?? $ps['supplier_num'] ?? $ps['id'] ?? null;
         if ($num === null) continue;
 
         $price = fetchSupplierPrice($num, $baseUrl, $apiKey);
