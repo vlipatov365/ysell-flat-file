@@ -63,14 +63,16 @@ function httpGet(string $url): string
     return (!$error && $html) ? (string)$html : '';
 }
 
-// ─── Fetch all products (paginated) ────────────────────────────────────────
+// ─── Fetch all products (paginated, with productSuppliers) ─────────────────
 function fetchAllProducts(string $baseUrl, string $apiKey): array
 {
     $products = [];
     $page     = 1;
     do {
         echo "  Fetching page {$page}...\n";
-        $response = apiGet("{$baseUrl}/api/v1/product?per_page=50&page={$page}", $apiKey);
+        // Include productSuppliers relation so we can resolve price via supplier endpoint
+        $url      = "{$baseUrl}/api/v1/product?per_page=50&page={$page}&with[]=productSuppliers";
+        $response = apiGet($url, $apiKey);
         $items    = $response['data'] ?? $response;
         $lastPage = $response['meta']['last_page'] ?? $response['last_page'] ?? 1;
         if (!is_array($items) || empty($items)) break;
@@ -232,11 +234,59 @@ function resolveCondition(array $product): array
 }
 
 // ─── Price ─────────────────────────────────────────────────────────────────
-function resolvePrice(array $product): string
+
+// Cache supplier product responses: [supplierNum => price_string]
+$_supplierPriceCache = [];
+
+function fetchSupplierPrice(int|string $supplierNum, string $baseUrl, string $apiKey): string
 {
-    $price = $product['purchase_price'] ?? $product['netto'] ?? null;
-    if ($price === null || $price === '' || (float)$price === 0.0) return '';
-    return number_format((float)$price, 2, '.', '');
+    global $_supplierPriceCache;
+
+    $key = (string)$supplierNum;
+    if (array_key_exists($key, $_supplierPriceCache)) {
+        return $_supplierPriceCache[$key];
+    }
+
+    try {
+        $response = apiGet("{$baseUrl}/api/v1/supplier/{$supplierNum}/product", $apiKey);
+        // Response may be wrapped or direct; price field may vary
+        $data  = $response['data'] ?? $response;
+        $price = $data['price'] ?? $data['purchase_price'] ?? $data['cost']
+              ?? $data['netto']  ?? null;
+
+        if ($price !== null && (float)$price > 0) {
+            $result = number_format((float)$price, 2, '.', '');
+            $_supplierPriceCache[$key] = $result;
+            return $result;
+        }
+    } catch (RuntimeException) {
+        // supplier endpoint failed — fall through to ''
+    }
+
+    $_supplierPriceCache[$key] = '';
+    return '';
+}
+
+function resolvePrice(array $product, string $baseUrl, string $apiKey): string
+{
+    // Level 1: purchase_price directly on the product
+    $direct = $product['purchase_price'] ?? null;
+    if ($direct !== null && $direct !== '' && (float)$direct > 0) {
+        return number_format((float)$direct, 2, '.', '');
+    }
+
+    // Level 2: productSuppliers relation → GET /api/v1/supplier/{num}/product
+    $suppliers = $product['productSuppliers'] ?? [];
+    foreach ($suppliers as $ps) {
+        // supplierNum is the correct field per API spec; fallbacks for safety
+        $num = $ps['supplierNum'] ?? $ps['supplier_id'] ?? $ps['supplier_num'] ?? $ps['id'] ?? null;
+        if ($num === null) continue;
+
+        $price = fetchSupplierPrice($num, $baseUrl, $apiKey);
+        if ($price !== '') return $price;
+    }
+
+    return '';
 }
 
 // ─── SKU / Herstellernummer ─────────────────────────────────────────────────
@@ -433,7 +483,7 @@ HTML;
 }
 
 // ─── Main mapping ──────────────────────────────────────────────────────────
-function mapProductToRow(array $product, array $manufacturers): array
+function mapProductToRow(array $product, array $manufacturers, string $baseUrl, string $apiKey): array
 {
     $manufacturerId   = (int)($product['manufacturer_id'] ?? 0);
     $manufacturerName = $manufacturers[$manufacturerId] ?? '';
@@ -457,7 +507,7 @@ function mapProductToRow(array $product, array $manufacturers): array
         '*Title'                 => $title,
         '*ConditionID'           => $condition['id'],
         'ConditionDescription'   => $condition['description'],
-        '*StartPrice'            => resolvePrice($product),
+        '*StartPrice'            => resolvePrice($product, $baseUrl, $apiKey),
         '*Quantity'              => '1',
         '*Format'                => 'FixedPrice',
         '*Duration'              => 'GTC',
@@ -544,7 +594,7 @@ $sheet       = $spreadsheet->getActiveSheet();
 $row      = 2;
 $nocat    = 0;
 foreach ($products as $product) {
-    $mapped = mapProductToRow($product, $manufacturers);
+    $mapped = mapProductToRow($product, $manufacturers, $baseUrl, $apiKey);
     foreach ($mapped as $header => $value) {
         $col = COL_MAP[$header] ?? null;
         if ($col !== null) {

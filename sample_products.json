@@ -17,11 +17,14 @@
         "title": "Seitenteil Halter Halterung rechts für Türfach Kühlschrank wie Liebherr 7433698 9193354",
         "condition": "New",
         "manufacturer_id": 2,
-        "purchase_price": "3.74",
+        "purchase_price": null,
         "netto": 0,
         "owner_id": null,
         "image": "https://4457.test1.ysell.pro/product_images/7/16342021668.jpeg",
-        "setProducts": []
+        "setProducts": [],
+        "productSuppliers": [
+            {"id": 101, "supplierNum": 3}
+        ]
     },
     {
         "id": 8,
@@ -29,11 +32,14 @@
         "title": "Spannrolle wie Bosch 00600436 für Zweibandmotor Trockner",
         "condition": "New",
         "manufacturer_id": 2,
-        "purchase_price": "3.96",
+        "purchase_price": null,
         "netto": 0,
         "owner_id": null,
         "image": "https://4457.test1.ysell.pro/product_images/8/p-1-69678_1-1_info.jpg",
-        "setProducts": []
+        "setProducts": [],
+        "productSuppliers": [
+            {"id": 102, "supplierNum": 5}
+        ]
     },
     {
         "id": 5,
