@@ -137,46 +137,118 @@ function getCategoryByKeywords(string $title): string
     return '';
 }
 
-// ─── Category: Variant B — eBay.de scraping ───────────────────────────────
-$_ebayCache = [];
+// ─── Category + Material: eBay.de scraping ────────────────────────────────
+// Returns ['category' => '...', 'material' => '...']
+// Both fields are fetched in a single pass and cached together.
+$_ebayDataCache = [];
 
-function getCategoryByEbayScraping(string $title): string
+function scrapeEbayData(string $title): array
 {
-    global $_ebayCache;
+    global $_ebayDataCache;
 
     $cacheKey = md5($title);
-    if (isset($_ebayCache[$cacheKey])) {
-        return $_ebayCache[$cacheKey];
+    if (isset($_ebayDataCache[$cacheKey])) {
+        return $_ebayDataCache[$cacheKey];
     }
 
-    $searchUrl = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($title) . '&_sacat=0';
-    $html      = httpGet($searchUrl);
+    $data = ['category' => '', 'material' => ''];
 
-    if ($html === '') {
-        echo "    eBay scraping failed (no response).\n";
-        $_ebayCache[$cacheKey] = '';
-        return '';
+    // Step 1: search eBay.de
+    $searchUrl  = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($title) . '&_sacat=0';
+    $searchHtml = httpGet($searchUrl);
+
+    if ($searchHtml === '') {
+        echo "    eBay scraping: no response from search.\n";
+        $_ebayDataCache[$cacheKey] = $data;
+        return $data;
     }
 
-    // Strategy 1: Find _sacat= in category sidebar/breadcrumb links
-    // eBay sidebar: href="...?_sacat=43566..." — pick first non-zero 4-6 digit ID
-    preg_match_all('/_sacat=(\d{4,6})\b/', $html, $m);
-    foreach ($m[1] as $cat) {
-        if ($cat !== '0' && $cat !== '00000') {
-            $_ebayCache[$cacheKey] = $cat;
-            return $cat;
+    // Step 2: extract first product page URL from search results
+    preg_match('/href="(https:\/\/www\.ebay\.de\/itm\/[^"?]+)"/', $searchHtml, $itemMatch);
+    $itemUrl = $itemMatch[1] ?? '';
+
+    if ($itemUrl !== '') {
+        // Step 3: fetch the product page
+        $itemHtml = httpGet($itemUrl);
+
+        if ($itemHtml !== '') {
+            // Step 4: parse category from JSON-LD BreadcrumbList
+            if (preg_match_all(
+                '/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si',
+                $itemHtml,
+                $scripts
+            )) {
+                foreach ($scripts[1] as $jsonRaw) {
+                    $jsonData = json_decode(trim($jsonRaw), true);
+                    if (
+                        is_array($jsonData)
+                        && ($jsonData['@type'] ?? '') === 'BreadcrumbList'
+                        && !empty($jsonData['itemListElement'])
+                    ) {
+                        $lastItem = end($jsonData['itemListElement']);
+                        $itemHref = $lastItem['item'] ?? '';
+                        if (preg_match('/\/b\/[^\/]+\/(\d{4,7})\//', $itemHref, $idMatch)) {
+                            $data['category'] = $idMatch[1];
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Fallback: scan /b/Name/ID/ hrefs in breadcrumb area, take last
+            if ($data['category'] === '') {
+                preg_match_all(
+                    '/href="https:\/\/www\.ebay\.de\/b\/[^\/]+\/(\d{4,7})\/[^"]*"/',
+                    $itemHtml,
+                    $allCats
+                );
+                if (!empty($allCats[1])) {
+                    $data['category'] = end($allCats[1]);
+                }
+            }
+
+            // Step 5: extract Material from <dl class="...ux-labels-values--material...">
+            // Structure: <dl class="...ux-labels-values--material...">
+            //              <dt>...<span>Material</span>...</dt>
+            //              <dd>...<span>VALUE</span>...</dd>
+            //            </dl>
+            if (preg_match(
+                '/<dl[^>]+ux-labels-values--material[^>]*>.*?<dd[^>]*>.*?<span[^>]*>(.*?)<\/span>/si',
+                $itemHtml,
+                $matMatch
+            )) {
+                $data['material'] = trim(strip_tags($matMatch[1]));
+            }
         }
     }
 
-    // Strategy 2: Look for data-sacat attribute
-    preg_match('/data-sacat=["\'](\d{4,6})["\']/', $html, $m2);
-    if (!empty($m2[1]) && $m2[1] !== '0') {
-        $_ebayCache[$cacheKey] = $m2[1];
-        return $m2[1];
+    // Last resort for category: _sacat= in search results
+    if ($data['category'] === '') {
+        preg_match_all('/_sacat=(\d{4,6})\b/', $searchHtml, $sacatMatches);
+        foreach ($sacatMatches[1] as $cat) {
+            if ($cat !== '0') {
+                $data['category'] = $cat;
+                break;
+            }
+        }
     }
 
-    $_ebayCache[$cacheKey] = '';
-    return '';
+    if ($data['category'] === '') {
+        echo "    eBay scraping returned no category.\n";
+    }
+
+    $_ebayDataCache[$cacheKey] = $data;
+    return $data;
+}
+
+function getCategoryByEbayScraping(string $title): string
+{
+    return scrapeEbayData($title)['category'];
+}
+
+function getMaterialByEbayScraping(string $title): string
+{
+    return scrapeEbayData($title)['material'];
 }
 
 // ─── Category: combined resolver (A then B) ────────────────────────────────
@@ -521,7 +593,7 @@ function mapProductToRow(array $product, array $manufacturers, string $baseUrl, 
         'C:Produktart'           => $firstWord,
         'C:Produkt'              => $firstWord,
         'C:Farbe'                => '',
-        'C:Material'             => '',
+        'C:Material'             => getMaterialByEbayScraping($rawTitle),
         'C:Markenkompatibilität' => implode(', ', $compat['brands']),
         'C:Modellkompatibilität' => implode(', ', $compat['models']),
         'C:Herstellernummer'     => $sku['herstellernummer'],
