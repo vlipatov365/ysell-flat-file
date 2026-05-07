@@ -173,7 +173,7 @@ function scrapeEbayData(string $title): array
     // Step 1: search by article number (more precise), fallback to full title
     $articleNum  = extractArticleNumber($title);
     $searchQuery = $articleNum !== '' ? $articleNum : $title;
-    $searchUrl   = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($searchQuery) . '&_sacat=0';
+    $searchUrl   = 'https://www.ebay.com/sch/i.html?_nkw=' . urlencode($searchQuery) . '&_sacat=0';
     $searchHtml  = httpGet($searchUrl);
 
     if ($searchHtml === '') {
@@ -182,9 +182,16 @@ function scrapeEbayData(string $title): array
         return $data;
     }
 
-    // Step 2: extract first product page URL from search results
-    preg_match('/href="(https:\/\/www\.ebay\.de\/itm\/[^"?]+)"/', $searchHtml, $itemMatch);
-    $itemUrl = $itemMatch[1] ?? '';
+    // Step 2: first product URL from search results
+    // Matches <a class="s-card__link ..."> href; strips query params to get clean item URL
+    $itemUrl = '';
+    if (preg_match(
+        '/<a[^>]+class="[^"]*s-card__link[^"]*"[^>]*href="(https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+)[?"&][^"]*"/i',
+        $searchHtml,
+        $itemMatch
+    )) {
+        $itemUrl = $itemMatch[1];
+    }
 
     if ($itemUrl !== '') {
         // Step 3: fetch the product page
