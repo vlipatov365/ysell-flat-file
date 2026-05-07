@@ -233,10 +233,6 @@ function scrapeEbayData(string $title): array
         }
     }
 
-    if ($data['category'] === '') {
-        echo "    eBay scraping returned no category.\n";
-    }
-
     $_ebayDataCache[$cacheKey] = $data;
     return $data;
 }
