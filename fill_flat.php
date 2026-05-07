@@ -149,34 +149,82 @@ function getCategoryByEbayScraping(string $title): string
         return $_ebayCache[$cacheKey];
     }
 
+    // Step 1: search eBay.de
     $searchUrl = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($title) . '&_sacat=0';
-    $html      = httpGet($searchUrl);
+    $searchHtml = httpGet($searchUrl);
 
-    if ($html === '') {
-        echo "    eBay scraping failed (no response).\n";
+    if ($searchHtml === '') {
+        echo "    eBay scraping: no response from search.\n";
         $_ebayCache[$cacheKey] = '';
         return '';
     }
 
-    // Strategy 1: Find _sacat= in category sidebar/breadcrumb links
-    // eBay sidebar: href="...?_sacat=43566..." — pick first non-zero 4-6 digit ID
-    preg_match_all('/_sacat=(\d{4,6})\b/', $html, $m);
-    foreach ($m[1] as $cat) {
-        if ($cat !== '0' && $cat !== '00000') {
-            $_ebayCache[$cacheKey] = $cat;
-            return $cat;
+    // Step 2: extract first product page URL from search results
+    preg_match('/href="(https:\/\/www\.ebay\.de\/itm\/[^"?]+)"/', $searchHtml, $itemMatch);
+    $itemUrl = $itemMatch[1] ?? '';
+
+    $result = '';
+
+    if ($itemUrl !== '') {
+        // Step 3: fetch the product page
+        $itemHtml = httpGet($itemUrl);
+
+        if ($itemHtml !== '') {
+            // Step 4a: parse JSON-LD BreadcrumbList — most reliable
+            if (preg_match_all(
+                '/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si',
+                $itemHtml,
+                $scripts
+            )) {
+                foreach ($scripts[1] as $jsonRaw) {
+                    $jsonData = json_decode(trim($jsonRaw), true);
+                    if (
+                        is_array($jsonData)
+                        && ($jsonData['@type'] ?? '') === 'BreadcrumbList'
+                        && !empty($jsonData['itemListElement'])
+                    ) {
+                        // Last element = most specific (deepest) category
+                        $lastItem = end($jsonData['itemListElement']);
+                        $itemHref = $lastItem['item'] ?? '';
+                        if (preg_match('/\/b\/[^\/]+\/(\d{4,7})\//', $itemHref, $idMatch)) {
+                            $result = $idMatch[1];
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Step 4b: fallback — scan breadcrumb <ul> for /b/Name/ID/ hrefs, take last
+            if ($result === '') {
+                preg_match_all(
+                    '/href="https:\/\/www\.ebay\.de\/b\/[^\/]+\/(\d{4,7})\/[^"]*"/',
+                    $itemHtml,
+                    $allCats
+                );
+                if (!empty($allCats[1])) {
+                    $result = end($allCats[1]);
+                }
+            }
         }
     }
 
-    // Strategy 2: Look for data-sacat attribute
-    preg_match('/data-sacat=["\'](\d{4,6})["\']/', $html, $m2);
-    if (!empty($m2[1]) && $m2[1] !== '0') {
-        $_ebayCache[$cacheKey] = $m2[1];
-        return $m2[1];
+    // Step 5: last resort — _sacat= in search results page
+    if ($result === '') {
+        preg_match_all('/_sacat=(\d{4,6})\b/', $searchHtml, $sacatMatches);
+        foreach ($sacatMatches[1] as $cat) {
+            if ($cat !== '0') {
+                $result = $cat;
+                break;
+            }
+        }
     }
 
-    $_ebayCache[$cacheKey] = '';
-    return '';
+    if ($result === '') {
+        echo "    eBay scraping returned no category.\n";
+    }
+
+    $_ebayCache[$cacheKey] = $result;
+    return $result;
 }
 
 // ─── Category: combined resolver (A then B) ────────────────────────────────
