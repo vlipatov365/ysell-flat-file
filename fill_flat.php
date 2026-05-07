@@ -106,30 +106,32 @@ function getCategoryByKeywords(string $title): string
 {
     $t = mb_strtolower($title, 'UTF-8');
 
-    // More specific rules first
+    // More specific rules first; values are eBay.de category names
     $rules = [
-        '116026' => ['geschirrspüler', 'geschirrspueler', 'spülmaschine', 'spuelmachine',
-                     'sprüharm', 'sprüharm', 'seilzug', 'reedplatine'],
-        '99697'  => ['waschmaschine', 'trockner', 'waschtrockner', 'schleuder',
-                     'flusensieb', 'spannrolle', 'bottich', 'waschmitteleinsatz',
-                     'flüssigwaschmittel', 'zweibandmotor'],
-        '184666' => ['kühlschrank', 'kühlgerät', 'gefriergerät', 'gefrierschrank',
-                     'gefrierraum', 'kühl-gefrier', 'kühlaggregat', 'türfach'],
-        '43566'  => ['backofen', 'backrohr', 'herd', 'backblech', 'grillpfanne',
-                     'fettpfanne', 'oberhitze', 'unterhitze', 'thermostat',
-                     'türinnengitter', 'backofenthermostat'],
-        '71253'  => ['dunstabzugshaube', 'dunstabzug', 'abzugshaube', 'dampfabzug',
-                     'lampenabdeckung'],
-        '99565'  => ['kaffeemaschine', 'kaffeevollautomat', 'espresso', 'kaffeeautomat',
-                     'heißwasserdüse', 'staubsauger', 'filterbeutel', 'sauger',
-                     'mehrzwecksauger', 'brotbackautomat', 'brotbackmaschine',
-                     'fleischwolf', 'küchenmaschine', 'küchmaschine', 'knethaken', 'zahnrad'],
+        'Geschirrspülerteile'              => ['geschirrspüler', 'geschirrspueler', 'spülmaschine',
+                                               'spuelmachine', 'sprüharm', 'seilzug', 'reedplatine'],
+        'Waschmaschinen- & Trocknerteile'  => ['waschmaschine', 'trockner', 'waschtrockner',
+                                               'schleuder', 'flusensieb', 'spannrolle', 'bottich',
+                                               'waschmitteleinsatz', 'flüssigwaschmittel', 'zweibandmotor'],
+        'Kühlschrank- & Gefriergeräteteile' => ['kühlschrank', 'kühlgerät', 'gefriergerät',
+                                               'gefrierschrank', 'gefrierraum', 'kühl-gefrier',
+                                               'kühlaggregat', 'türfach'],
+        'Backofen- & Herdteile'            => ['backofen', 'backrohr', 'herd', 'backblech',
+                                               'grillpfanne', 'fettpfanne', 'oberhitze', 'unterhitze',
+                                               'thermostat', 'türinnengitter', 'backofenthermostat'],
+        'Dunstabzugshaubenteile'           => ['dunstabzugshaube', 'dunstabzug', 'abzugshaube',
+                                               'dampfabzug', 'lampenabdeckung'],
+        'Kleine Haushaltsgeräte'           => ['kaffeemaschine', 'kaffeevollautomat', 'espresso',
+                                               'kaffeeautomat', 'heißwasserdüse', 'staubsauger',
+                                               'filterbeutel', 'sauger', 'mehrzwecksauger',
+                                               'brotbackautomat', 'brotbackmaschine', 'fleischwolf',
+                                               'küchenmaschine', 'küchmaschine', 'knethaken', 'zahnrad'],
     ];
 
-    foreach ($rules as $categoryId => $keywords) {
+    foreach ($rules as $categoryName => $keywords) {
         foreach ($keywords as $kw) {
             if (str_contains($t, $kw)) {
-                return (string)$categoryId;
+                return $categoryName;
             }
         }
     }
@@ -172,7 +174,8 @@ function scrapeEbayData(string $title): array
         $itemHtml = httpGet($itemUrl);
 
         if ($itemHtml !== '') {
-            // Step 4: parse category from JSON-LD BreadcrumbList
+            // Step 4: parse category name from JSON-LD BreadcrumbList
+            // Last element = most specific (deepest) category; use its 'name' field
             if (preg_match_all(
                 '/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si',
                 $itemHtml,
@@ -186,24 +189,22 @@ function scrapeEbayData(string $title): array
                         && !empty($jsonData['itemListElement'])
                     ) {
                         $lastItem = end($jsonData['itemListElement']);
-                        $itemHref = $lastItem['item'] ?? '';
-                        if (preg_match('/\/b\/[^\/]+\/(\d{4,7})\//', $itemHref, $idMatch)) {
-                            $data['category'] = $idMatch[1];
+                        $name = trim((string)($lastItem['name'] ?? ''));
+                        if ($name !== '' && $name !== 'eBay') {
+                            $data['category'] = $name;
                         }
                         break;
                     }
                 }
             }
 
-            // Fallback: scan /b/Name/ID/ hrefs in breadcrumb area, take last
+            // Fallback: extract text of last <li> in the breadcrumb <ul>
             if ($data['category'] === '') {
-                preg_match_all(
-                    '/href="https:\/\/www\.ebay\.de\/b\/[^\/]+\/(\d{4,7})\/[^"]*"/',
-                    $itemHtml,
-                    $allCats
-                );
-                if (!empty($allCats[1])) {
-                    $data['category'] = end($allCats[1]);
+                if (preg_match_all('/<li[^>]*>.*?<span[^>]*>([^<]+)<\/span>.*?<\/li>/si', $itemHtml, $liMatches)) {
+                    $last = trim(end($liMatches[1]));
+                    if ($last !== '') {
+                        $data['category'] = $last;
+                    }
                 }
             }
 
@@ -218,17 +219,6 @@ function scrapeEbayData(string $title): array
                 $matMatch
             )) {
                 $data['material'] = trim(strip_tags($matMatch[1]));
-            }
-        }
-    }
-
-    // Last resort for category: _sacat= in search results
-    if ($data['category'] === '') {
-        preg_match_all('/_sacat=(\d{4,6})\b/', $searchHtml, $sacatMatches);
-        foreach ($sacatMatches[1] as $cat) {
-            if ($cat !== '0') {
-                $data['category'] = $cat;
-                break;
             }
         }
     }
