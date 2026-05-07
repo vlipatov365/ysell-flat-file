@@ -144,6 +144,21 @@ function getCategoryByKeywords(string $title): string
 // Both fields are fetched in a single pass and cached together.
 $_ebayDataCache = [];
 
+// Extract first OEM/article number from title for precise eBay search
+function extractArticleNumber(string $title): string
+{
+    // Prefer number from "wie BRAND NUMBER ..." segment
+    if (preg_match('/\bwie\s+(.+?)(?:\s+(?:für|in|an|von|mit|zu)\b|$)/u', $title, $wie)) {
+        preg_match_all('/\b[A-Z0-9]*\d[A-Z0-9.\-\/]*\b/u', $wie[1], $m);
+        if (!empty($m[0])) return $m[0][0];
+    }
+    // Fallback: first long alphanumeric token containing a digit
+    if (preg_match('/\b[A-Z0-9]*\d[A-Z0-9.\-\/]{4,}\b/', $title, $m)) {
+        return $m[0];
+    }
+    return '';
+}
+
 function scrapeEbayData(string $title): array
 {
     global $_ebayDataCache;
@@ -155,9 +170,11 @@ function scrapeEbayData(string $title): array
 
     $data = ['category' => '', 'material' => ''];
 
-    // Step 1: search eBay.de
-    $searchUrl  = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($title) . '&_sacat=0';
-    $searchHtml = httpGet($searchUrl);
+    // Step 1: search by article number (more precise), fallback to full title
+    $articleNum  = extractArticleNumber($title);
+    $searchQuery = $articleNum !== '' ? $articleNum : $title;
+    $searchUrl   = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($searchQuery) . '&_sacat=0';
+    $searchHtml  = httpGet($searchUrl);
 
     if ($searchHtml === '') {
         echo "    eBay scraping: no response from search.\n";
@@ -189,7 +206,7 @@ function scrapeEbayData(string $title): array
                         && !empty($jsonData['itemListElement'])
                     ) {
                         $lastItem = end($jsonData['itemListElement']);
-                        $name = trim((string)($lastItem['name'] ?? ''));
+                        $name = trim(html_entity_decode((string)($lastItem['name'] ?? ''), ENT_QUOTES, 'UTF-8'));
                         if ($name !== '' && $name !== 'eBay') {
                             $data['category'] = $name;
                         }
@@ -198,21 +215,20 @@ function scrapeEbayData(string $title): array
                 }
             }
 
-            // Fallback: extract text of last <li> in the breadcrumb <ul>
+            // Fallback: last <a class="seo-breadcrumb-text"> span text
             if ($data['category'] === '') {
-                if (preg_match_all('/<li[^>]*>.*?<span[^>]*>([^<]+)<\/span>.*?<\/li>/si', $itemHtml, $liMatches)) {
-                    $last = trim(end($liMatches[1]));
-                    if ($last !== '') {
-                        $data['category'] = $last;
-                    }
+                preg_match_all(
+                    '/<a[^>]+class="[^"]*seo-breadcrumb-text[^"]*"[^>]*>.*?<span[^>]*>([^<]+)<\/span>/si',
+                    $itemHtml,
+                    $bcMatches
+                );
+                if (!empty($bcMatches[1])) {
+                    $last = trim(html_entity_decode(end($bcMatches[1]), ENT_QUOTES, 'UTF-8'));
+                    if ($last !== '') $data['category'] = $last;
                 }
             }
 
             // Step 5: extract Material from <dl class="...ux-labels-values--material...">
-            // Structure: <dl class="...ux-labels-values--material...">
-            //              <dt>...<span>Material</span>...</dt>
-            //              <dd>...<span>VALUE</span>...</dd>
-            //            </dl>
             if (preg_match(
                 '/<dl[^>]+ux-labels-values--material[^>]*>.*?<dd[^>]*>.*?<span[^>]*>(.*?)<\/span>/si',
                 $itemHtml,
