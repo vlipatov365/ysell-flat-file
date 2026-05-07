@@ -106,30 +106,32 @@ function getCategoryByKeywords(string $title): string
 {
     $t = mb_strtolower($title, 'UTF-8');
 
-    // More specific rules first
+    // More specific rules first; values are eBay.de category names
     $rules = [
-        '116026' => ['geschirrspüler', 'geschirrspueler', 'spülmaschine', 'spuelmachine',
-                     'sprüharm', 'sprüharm', 'seilzug', 'reedplatine'],
-        '99697'  => ['waschmaschine', 'trockner', 'waschtrockner', 'schleuder',
-                     'flusensieb', 'spannrolle', 'bottich', 'waschmitteleinsatz',
-                     'flüssigwaschmittel', 'zweibandmotor'],
-        '184666' => ['kühlschrank', 'kühlgerät', 'gefriergerät', 'gefrierschrank',
-                     'gefrierraum', 'kühl-gefrier', 'kühlaggregat', 'türfach'],
-        '43566'  => ['backofen', 'backrohr', 'herd', 'backblech', 'grillpfanne',
-                     'fettpfanne', 'oberhitze', 'unterhitze', 'thermostat',
-                     'türinnengitter', 'backofenthermostat'],
-        '71253'  => ['dunstabzugshaube', 'dunstabzug', 'abzugshaube', 'dampfabzug',
-                     'lampenabdeckung'],
-        '99565'  => ['kaffeemaschine', 'kaffeevollautomat', 'espresso', 'kaffeeautomat',
-                     'heißwasserdüse', 'staubsauger', 'filterbeutel', 'sauger',
-                     'mehrzwecksauger', 'brotbackautomat', 'brotbackmaschine',
-                     'fleischwolf', 'küchenmaschine', 'küchmaschine', 'knethaken', 'zahnrad'],
+        'Geschirrspülerteile'              => ['geschirrspüler', 'geschirrspueler', 'spülmaschine',
+                                               'spuelmachine', 'sprüharm', 'seilzug', 'reedplatine'],
+        'Waschmaschinen- & Trocknerteile'  => ['waschmaschine', 'trockner', 'waschtrockner',
+                                               'schleuder', 'flusensieb', 'spannrolle', 'bottich',
+                                               'waschmitteleinsatz', 'flüssigwaschmittel', 'zweibandmotor'],
+        'Kühlschrank- & Gefriergeräteteile' => ['kühlschrank', 'kühlgerät', 'gefriergerät',
+                                               'gefrierschrank', 'gefrierraum', 'kühl-gefrier',
+                                               'kühlaggregat', 'türfach'],
+        'Backofen- & Herdteile'            => ['backofen', 'backrohr', 'herd', 'backblech',
+                                               'grillpfanne', 'fettpfanne', 'oberhitze', 'unterhitze',
+                                               'thermostat', 'türinnengitter', 'backofenthermostat'],
+        'Dunstabzugshaubenteile'           => ['dunstabzugshaube', 'dunstabzug', 'abzugshaube',
+                                               'dampfabzug', 'lampenabdeckung'],
+        'Kleine Haushaltsgeräte'           => ['kaffeemaschine', 'kaffeevollautomat', 'espresso',
+                                               'kaffeeautomat', 'heißwasserdüse', 'staubsauger',
+                                               'filterbeutel', 'sauger', 'mehrzwecksauger',
+                                               'brotbackautomat', 'brotbackmaschine', 'fleischwolf',
+                                               'küchenmaschine', 'küchmaschine', 'knethaken', 'zahnrad'],
     ];
 
-    foreach ($rules as $categoryId => $keywords) {
+    foreach ($rules as $categoryName => $keywords) {
         foreach ($keywords as $kw) {
             if (str_contains($t, $kw)) {
-                return (string)$categoryId;
+                return $categoryName;
             }
         }
     }
@@ -142,6 +144,21 @@ function getCategoryByKeywords(string $title): string
 // Both fields are fetched in a single pass and cached together.
 $_ebayDataCache = [];
 
+// Extract first OEM/article number from title for precise eBay search
+function extractArticleNumber(string $title): string
+{
+    // Prefer number from "wie BRAND NUMBER ..." segment
+    if (preg_match('/\bwie\s+(.+?)(?:\s+(?:für|in|an|von|mit|zu)\b|$)/u', $title, $wie)) {
+        preg_match_all('/\b[A-Z0-9]*\d[A-Z0-9.\-\/]*\b/u', $wie[1], $m);
+        if (!empty($m[0])) return $m[0][0];
+    }
+    // Fallback: first long alphanumeric token containing a digit
+    if (preg_match('/\b[A-Z0-9]*\d[A-Z0-9.\-\/]{4,}\b/', $title, $m)) {
+        return $m[0];
+    }
+    return '';
+}
+
 function scrapeEbayData(string $title): array
 {
     global $_ebayDataCache;
@@ -153,9 +170,11 @@ function scrapeEbayData(string $title): array
 
     $data = ['category' => '', 'material' => ''];
 
-    // Step 1: search eBay.de
-    $searchUrl  = 'https://www.ebay.de/sch/i.html?_nkw=' . urlencode($title) . '&_sacat=0';
-    $searchHtml = httpGet($searchUrl);
+    // Step 1: search by article number (more precise), fallback to full title
+    $articleNum  = extractArticleNumber($title);
+    $searchQuery = $articleNum !== '' ? $articleNum : $title;
+    $searchUrl   = 'https://www.ebay.com/sch/i.html?_nkw=' . urlencode($searchQuery) . '&_sacat=0';
+    $searchHtml  = httpGet($searchUrl);
 
     if ($searchHtml === '') {
         echo "    eBay scraping: no response from search.\n";
@@ -163,16 +182,24 @@ function scrapeEbayData(string $title): array
         return $data;
     }
 
-    // Step 2: extract first product page URL from search results
-    preg_match('/href="(https:\/\/www\.ebay\.de\/itm\/[^"?]+)"/', $searchHtml, $itemMatch);
-    $itemUrl = $itemMatch[1] ?? '';
+    // Step 2: first product URL from search results
+    // Matches <a class="s-card__link ..."> href; strips query params to get clean item URL
+    $itemUrl = '';
+    if (preg_match(
+        '/<a[^>]+class="[^"]*s-card__link[^"]*"[^>]*href="(https:\/\/www\.ebay\.[a-z.]+\/itm\/\d+)[?"&][^"]*"/i',
+        $searchHtml,
+        $itemMatch
+    )) {
+        $itemUrl = $itemMatch[1];
+    }
 
     if ($itemUrl !== '') {
         // Step 3: fetch the product page
         $itemHtml = httpGet($itemUrl);
 
         if ($itemHtml !== '') {
-            // Step 4: parse category from JSON-LD BreadcrumbList
+            // Step 4: parse category name from JSON-LD BreadcrumbList
+            // Last element = most specific (deepest) category; use its 'name' field
             if (preg_match_all(
                 '/<script[^>]+type=["\']application\/ld\+json["\'][^>]*>(.*?)<\/script>/si',
                 $itemHtml,
@@ -186,32 +213,29 @@ function scrapeEbayData(string $title): array
                         && !empty($jsonData['itemListElement'])
                     ) {
                         $lastItem = end($jsonData['itemListElement']);
-                        $itemHref = $lastItem['item'] ?? '';
-                        if (preg_match('/\/b\/[^\/]+\/(\d{4,7})\//', $itemHref, $idMatch)) {
-                            $data['category'] = $idMatch[1];
+                        $name = trim(html_entity_decode((string)($lastItem['name'] ?? ''), ENT_QUOTES, 'UTF-8'));
+                        if ($name !== '' && $name !== 'eBay') {
+                            $data['category'] = $name;
                         }
                         break;
                     }
                 }
             }
 
-            // Fallback: scan /b/Name/ID/ hrefs in breadcrumb area, take last
+            // Fallback: last <a class="seo-breadcrumb-text"> span text
             if ($data['category'] === '') {
                 preg_match_all(
-                    '/href="https:\/\/www\.ebay\.de\/b\/[^\/]+\/(\d{4,7})\/[^"]*"/',
+                    '/<a[^>]+class="[^"]*seo-breadcrumb-text[^"]*"[^>]*>.*?<span[^>]*>([^<]+)<\/span>/si',
                     $itemHtml,
-                    $allCats
+                    $bcMatches
                 );
-                if (!empty($allCats[1])) {
-                    $data['category'] = end($allCats[1]);
+                if (!empty($bcMatches[1])) {
+                    $last = trim(html_entity_decode(end($bcMatches[1]), ENT_QUOTES, 'UTF-8'));
+                    if ($last !== '') $data['category'] = $last;
                 }
             }
 
             // Step 5: extract Material from <dl class="...ux-labels-values--material...">
-            // Structure: <dl class="...ux-labels-values--material...">
-            //              <dt>...<span>Material</span>...</dt>
-            //              <dd>...<span>VALUE</span>...</dd>
-            //            </dl>
             if (preg_match(
                 '/<dl[^>]+ux-labels-values--material[^>]*>.*?<dd[^>]*>.*?<span[^>]*>(.*?)<\/span>/si',
                 $itemHtml,
@@ -220,21 +244,6 @@ function scrapeEbayData(string $title): array
                 $data['material'] = trim(strip_tags($matMatch[1]));
             }
         }
-    }
-
-    // Last resort for category: _sacat= in search results
-    if ($data['category'] === '') {
-        preg_match_all('/_sacat=(\d{4,6})\b/', $searchHtml, $sacatMatches);
-        foreach ($sacatMatches[1] as $cat) {
-            if ($cat !== '0') {
-                $data['category'] = $cat;
-                break;
-            }
-        }
-    }
-
-    if ($data['category'] === '') {
-        echo "    eBay scraping returned no category.\n";
     }
 
     $_ebayDataCache[$cacheKey] = $data;
